@@ -41,13 +41,14 @@ export class Hub extends DurableObject {
   async push(sub, payload) {
     const v = await this.vapid();
     const head = b64u(enc.encode(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
-    const claims = b64u(enc.encode(JSON.stringify({ aud: new URL(sub.endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'mailto:migym@example.com' })));
+    const claims = b64u(enc.encode(JSON.stringify({ aud: new URL(sub.endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'mailto:migym.avisos@gmail.com' })));
     const pk = await crypto.subtle.importKey('jwk', v.jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
     const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pk, enc.encode(head + '.' + claims)));
     const r = await fetch(sub.endpoint, { method: 'POST', body: await encrypt(sub, JSON.stringify(payload)), headers: {
       'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '120', Urgency: 'high',
       Authorization: `vapid t=${head}.${claims}.${b64u(sig)}, k=${v.pub}` } });
-    if (!r.ok) console.log('push', r.status, await r.text());
+    this.last = { status: r.status, reason: r.ok ? '' : (await r.text()).slice(0, 200) };
+    if (!r.ok) console.log('push', r.status, this.last.reason);
     return r.status;
   }
   async timers() { return (await this.ctx.storage.get('timers')) || {}; }
@@ -66,7 +67,7 @@ export class Hub extends DurableObject {
     if (path === '/key') return json({ publicKey: (await this.vapid()).pub });
     if (req.method !== 'POST') return json({ ok: true, app: 'Mi Gym avisos' });
     const b = JSON.parse(await req.text() || '{}');
-    if (path === '/test') return json({ status: await this.push(b.sub, { title: 'Mi Gym', body: 'Los avisos de descanso están activados ✓' }) });
+    if (path === '/test') { await this.push(b.sub, { title: 'Mi Gym', body: 'Los avisos de descanso están activados ✓' }); return json(this.last); }
     const t = await this.timers();
     if (path === '/schedule') { t[b.sub.endpoint] = { sub: b.sub, at: Math.max(Date.now() + 1000, +b.at), title: b.title || 'Descanso terminado', body: b.body || '' }; await this.save(t); return json({ ok: true }); }
     if (path === '/cancel') { delete t[b.endpoint]; await this.save(t); return json({ ok: true }); }
