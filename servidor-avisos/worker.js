@@ -59,17 +59,18 @@ export class Hub extends DurableObject {
   }
   async alarm() {
     const t = await this.timers(), now = Date.now() + 500;
-    for (const [k, x] of Object.entries(t)) if (x.at <= now) { delete t[k]; await this.push(x.sub, { title: x.title, body: x.body }); }
+    for (const [k, x] of Object.entries(t)) if (x.at <= now) { delete t[k]; await this.push(x.sub, { title: x.title, body: x.body }); await this.ctx.storage.put('log', { ...this.last, at: new Date().toISOString(), tipo: 'descanso' }); }
     await this.save(t);
   }
   async fetch(req) {
     const path = new URL(req.url).pathname;
+    if (path === '/estado') { const t = await this.timers(); return json({ pendientes: Object.values(t).map(x => new Date(x.at).toISOString()), alarma: await this.ctx.storage.getAlarm(), ultimoProgramado: await this.ctx.storage.get('prog'), ultimoEnvio: await this.ctx.storage.get('log'), ahora: new Date().toISOString() }); }
     if (path === '/key') return json({ publicKey: (await this.vapid()).pub });
     if (req.method !== 'POST') return json({ ok: true, app: 'Mi Gym avisos' });
     const b = JSON.parse(await req.text() || '{}');
     if (path === '/test') { await this.push(b.sub, { title: 'Mi Gym', body: 'Los avisos de descanso están activados ✓' }); return json(this.last); }
     const t = await this.timers();
-    if (path === '/schedule') { t[b.sub.endpoint] = { sub: b.sub, at: Math.max(Date.now() + 1000, +b.at), title: b.title || 'Descanso terminado', body: b.body || '' }; await this.save(t); return json({ ok: true }); }
+    if (path === '/schedule') { t[b.sub.endpoint] = { sub: b.sub, at: Math.max(Date.now() + 1000, +b.at), title: b.title || 'Descanso terminado', body: b.body || '' }; await this.save(t); await this.ctx.storage.put('prog', new Date(t[b.sub.endpoint].at).toISOString()); return json({ ok: true }); }
     if (path === '/cancel') { delete t[b.endpoint]; await this.save(t); return json({ ok: true }); }
     return json({ error: 'not found' }, 404);
   }
